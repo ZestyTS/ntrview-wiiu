@@ -73,6 +73,15 @@ int main(int argc, char** argv) {
     });
     #endif
 
+    #ifdef __WIIU__
+    KPADInit();
+    WPADEnableURCC(true);
+    WPADEnableWiiRemote(true);
+    OnLeavingScope kpd_c([&] {
+        //KPADShutdown();
+    });
+    #endif
+
     printf("hi\n");
 
     bret = Gfx::Init();
@@ -91,10 +100,10 @@ int main(int argc, char** argv) {
     }
 
     FSClient* swkbdFSClient = (FSClient*)malloc(sizeof(FSClient));
-    FSAddClient(swkbdFSClient, 0);
+    FSAddClient(swkbdFSClient, (FSErrorFlag)0);
     OnLeavingScope sfs_c([&] {
         if (swkbdFSClient) {
-            FSDelClient(swkbdFSClient, 0);
+            FSDelClient(swkbdFSClient, (FSErrorFlag)0);
             free(swkbdFSClient);
         }
     });
@@ -124,7 +133,7 @@ int main(int argc, char** argv) {
     Gfx::PrepRender();
     Gfx::PrepRenderBtm();
     Gfx::Clear(config.background);
-    loading_text.Render(loading_text.baseline_y, 480 - loading_text.d.h);
+    loading_text.Render(30, 480 - 30);
     Gfx::DoneRenderBtm();
     Gfx::Present();
 
@@ -155,6 +164,8 @@ int main(int argc, char** argv) {
     printf("gonna start rendering\n");
 
     bool menu = false;
+    bool menu_input_buffering = false;
+    Input::Priority last_input_priority = Input::Priority::VPAD;
 #ifdef __WIIU__
     while (WHBProcIsRunning()) {
 #else
@@ -164,6 +175,8 @@ int main(int argc, char** argv) {
         Network::State networkState = Network::GetNetworkState();
         const auto& profile = config.profiles[config.profile];
 
+        menus.overlay.NetworkState(networkState);
+
         //inputs
         auto input = Input::Get(profile.layout_drc[1]);
         if (input) {
@@ -171,7 +184,8 @@ int main(int argc, char** argv) {
                 //swkbd stuff
                 nn::swkbd::Calc((nn::swkbd::ControllerInfo) {
                     .vpad = &input->native.vpad,
-                    .kpad = { nullptr, nullptr, nullptr, nullptr }
+                    .kpad = { &input->native.kpad[0], &input->native.kpad[1],
+                        &input->native.kpad[2], &input->native.kpad[3] }
                 });
 
                 if (nn::swkbd::IsNeedCalcSubThreadFont()) {
@@ -182,17 +196,21 @@ int main(int argc, char** argv) {
                     nn::swkbd::CalcSubThreadPredict();
                 }
 
-                menus.Update(config, input->native);
+                menu = menus.Update(config, menu, *input);
+                if (!menu) menu_input_buffering = true;
+            } else {
+                menu = menus.Update(config, menu, *input);
 
-            } else if (networkState == Network::CONNECTED_STREAMING) {
-                Network::Input(input->ds);
+                if (networkState == Network::CONNECTED_STREAMING && !menu_input_buffering) {
+                    Network::Input(input->ds);
+                } else if (menu_input_buffering) {
+                    if (input->native.vpad.hold == 0) menu_input_buffering = false;
+                }
             }
 
-            //temp
-            if ((input->ds.buttons.data & (1<<Input::DS_BUTTON_SELECT)) == 0) {
-                menu = true;
-            } else if ((input->ds.buttons.data & (1<<Input::DS_BUTTON_START)) == 0) {
-                menu = false;
+            if (input->priority != last_input_priority) {
+                menus.overlay.InputPriorityMessage(input->priority, input->ext);
+                last_input_priority = input->priority;
             }
         }
 
@@ -214,7 +232,7 @@ int main(int argc, char** argv) {
                 btmTexture.Render(profile.layout_tv[curRes][1]);
             }
         }
-        menus.overlay.Render(networkState);
+        menus.overlay.Render();
         if (menu) menus.Render();
         nn::swkbd::DrawTV();
 
@@ -230,7 +248,7 @@ int main(int argc, char** argv) {
                 btmTexture.Render(profile.layout_drc[1]);
             }
         }
-        menus.overlay.Render(networkState);
+        menus.overlay.Render();
         if (menu) menus.Render();
         nn::swkbd::DrawDRC();
 
@@ -244,7 +262,7 @@ int main(int argc, char** argv) {
 
     /*  While we wait, write config file */
     {
-        std::ofstream config_file(NTRVIEW_DIR "/ntrview-new.ini", std::ios::binary);
+        std::ofstream config_file(NTRVIEW_DIR "/ntrview.ini", std::ios::binary);
         config.SaveINI(config_file);
     } //config_file goes out of scope here
 

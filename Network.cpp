@@ -6,14 +6,6 @@
 #include <thread>
 #include <algorithm>
 
-#ifdef __WIIU__
-//cool
-#else
-static int socketlasterr() {
-    return errno;
-}
-#endif
-
 using namespace Network;
 
 static State state = CONNECTING;
@@ -47,7 +39,7 @@ void Network::ConnectDS(const std::string host) {
     if (ret <= 0) {
         NetworkErrorF("Address %s invalid - check your config file", host.c_str());
         if (ds_sock >= 0) {
-            shutdown(ds_sock, 2); //HACK wiiu compat
+            close(ds_sock);
             ds_sock = -1;
         }
         state = ERR_BAD_IP;
@@ -59,7 +51,7 @@ void Network::ConnectDS(const std::string host) {
     if (ret < 0) {
         NetworkErrorF("Can't connect to DS (%s)", host.c_str());
         if (ds_sock >= 0) {
-            shutdown(ds_sock, 2); //HACK wiiu compat
+            close(ds_sock);
             ds_sock = -1;
         }
         return;
@@ -85,7 +77,7 @@ void Network::ListenUDP() {
     if (ret < 0) {
         NetworkError("Can't bind to UDP");
         if (udp_sock >= 0) {
-            shutdown(udp_sock, 2); //HACK wiiu compat
+            close(udp_sock);
             udp_sock = -1;
         }
         return;
@@ -238,7 +230,7 @@ int Network::SendInputRedirection(Input::InputState input) {
     int ret;
     if (input_sock < 0) {
         input_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (input_sock < 0) return socketlasterr();
+        if (input_sock < 0) return errno;
     }
     uint32_t packet[] = {
         [0] = NativeToLE(input.buttons.data),
@@ -251,10 +243,10 @@ int Network::SendInputRedirection(Input::InputState input) {
     ds_addr_input.sin_port = htons(4950);
     ret = sendto(input_sock, packet, sizeof(packet), 0, (struct sockaddr*)&ds_addr_input, sizeof(ds_addr_input));
     /*printf("input: %08X-%08X-%08X-%08X-%08X %d %d\n", packet[0], packet[1], packet[2], packet[3], packet[4],
-        ret, socketlasterr()
+        ret, errno
     );*/
     if (ret < 0) {
-        return socketlasterr();
+        return errno;
     } else return 0;
 }
 
@@ -270,7 +262,7 @@ int Network::SendHeartbeat() {
     };
     int ret = send(ds_sock, &pac, sizeof(pac), 0);
     if (ret < 0) {
-        return socketlasterr();
+        return errno;
     } else return 0;
 }
 
@@ -325,11 +317,11 @@ void Network::mainLoop(const Config::NetworkConfig* config) {
         printf("[Network] quit requested\n");
         if (ds_sock >= 0) {
             printf("[Network] Tearing down ds sock\n");
-            shutdown(ds_sock, 2); //HACK wiiu compat
+            close(ds_sock);
         }
         if (udp_sock >= 0) {
             printf("[Network] Tearing down udp sock\n");
-            shutdown(udp_sock, 2); //HACK wiiu compat
+            close(udp_sock);
         }
         printf("[Network] bye!\n");
         return;
@@ -353,22 +345,22 @@ void Network::mainLoop(const Config::NetworkConfig* config) {
     heartbeatThread.join();
 
     if (ds_sock >= 0) {
-        shutdown(ds_sock, 2); //HACK wiiu compat
+        close(ds_sock);
         ds_sock = -1;
     }
     if (udp_sock >= 0) {
-        shutdown(udp_sock, 2); //HACK wiiu compat
+        close(udp_sock);
         udp_sock = -1;
     }
 }
 
 void Network::Quit() {
     if (ds_sock >= 0) {
-        shutdown(ds_sock, 2); //HACK wiiu compat
+        close(ds_sock);
         ds_sock = -1;
     }
     if (udp_sock >= 0) {
-        shutdown(udp_sock, 2); //HACK wiiu compat
+        close(udp_sock);
         udp_sock = -1;
     }
     quit = true;
